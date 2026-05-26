@@ -143,7 +143,7 @@ const columnToField = Object.fromEntries(
 
 export async function readExcelHeaders(buffer: Buffer): Promise<string[]> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
+  await wb.xlsx.load(buffer as any);
   const ws = wb.worksheets[0];
   const headers: string[] = [];
   const row1 = ws.getRow(1);
@@ -192,7 +192,7 @@ export async function buildAndWriteExcel(
 
   // Write to Excel preserving template structure
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(templateBuffer);
+  await wb.xlsx.load(templateBuffer as any);
   const ws = wb.worksheets[0];
 
   // Build column index map from row 1
