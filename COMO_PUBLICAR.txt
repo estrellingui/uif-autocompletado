@@ -1,0 +1,100 @@
+════════════════════════════════════════════════════════════════
+   CÓMO PUBLICAR LA APP EN VERCEL — PASO A PASO
+════════════════════════════════════════════════════════════════
+
+TIEMPO ESTIMADO: 15 minutos (solo la primera vez)
+
+─────────────────────────────────────────────────────────────────
+PASO 1 — Crear una cuenta en GitHub (si no tenés)
+─────────────────────────────────────────────────────────────────
+
+1. Entrá a https://github.com
+2. Hacé clic en "Sign up"
+3. Seguí los pasos para crear tu cuenta
+4. Verificá tu correo electrónico
+
+─────────────────────────────────────────────────────────────────
+PASO 2 — Subir los archivos a GitHub
+─────────────────────────────────────────────────────────────────
+
+1. Entrá a https://github.com con tu cuenta
+2. Hacé clic en el botón verde "New" (o el símbolo +)
+3. En "Repository name" escribí: uif-autocompletado
+4. Dejá todo lo demás como está y hacé clic en "Create repository"
+5. En la pantalla que aparece, buscá el link que dice
+   "uploading an existing file" y hacé clic ahí
+6. Seleccioná TODOS los archivos de esta carpeta y subcarpetas:
+   - Importante: subí también las subcarpetas src/ y lib/
+     (hacé clic en cada subcarpeta y subí los archivos dentro)
+7. En el campo de mensaje escribí: "primera versión"
+8. Hacé clic en "Commit changes"
+
+ TRUCO: Si ves la opción de arrastrar carpetas, arrastrá
+ directamente la carpeta UIF-Vercel completa.
+
+─────────────────────────────────────────────────────────────────
+PASO 3 — Crear una cuenta en Vercel
+─────────────────────────────────────────────────────────────────
+
+1. Entrá a https://vercel.com
+2. Hacé clic en "Sign Up"
+3. Elegí "Continue with GitHub" (lo más fácil)
+4. Autorizá la conexión entre Vercel y GitHub
+
+─────────────────────────────────────────────────────────────────
+PASO 4 — Publicar la app en Vercel
+─────────────────────────────────────────────────────────────────
+
+1. En Vercel, hacé clic en "Add New Project"
+2. Buscá tu repositorio "uif-autocompletado" y hacé clic en "Import"
+3. En la pantalla de configuración:
+   - Framework Preset: debería detectar "Next.js" automáticamente
+   - Dejá todo lo demás como está
+4. Hacé clic en "Deploy"
+5. Esperá 2-3 minutos mientras Vercel construye la app
+6. Cuando termine, vas a ver una pantalla verde con una URL
+   del tipo: https://uif-autocompletado-abc123.vercel.app
+7. ¡Tu app ya está publicada! Guardá esa URL.
+
+─────────────────────────────────────────────────────────────────
+PASO 5 — Usar la app
+─────────────────────────────────────────────────────────────────
+
+1. Abrí la URL de tu app en cualquier navegador
+2. Ingresá tu API Key de Claude (la que empieza con sk-ant-...)
+3. Subí el Excel base y los PDF
+4. Hacé clic en "Procesar"
+5. Descargá el Excel completado
+
+ CONSEJO: Si querés que la API Key ya esté precargada
+(para no tenerla que escribir cada vez):
+  - En Vercel, abrí tu proyecto
+  - Hacé clic en "Settings" → "Environment Variables"
+  - Agregá: Name = ANTHROPIC_API_KEY, Value = tu-clave-sk-ant-...
+  - Hacé clic en "Save" y luego "Redeploy"
+
+─────────────────────────────────────────────────────────────────
+ACTUALIZAR LA APP EN EL FUTURO
+─────────────────────────────────────────────────────────────────
+
+Si alguien modifica los archivos y necesitás actualizar la app:
+1. Subí los archivos nuevos a GitHub (mismo repositorio)
+2. Vercel detecta el cambio automáticamente y republica la app
+
+─────────────────────────────────────────────────────────────────
+PREGUNTAS FRECUENTES
+─────────────────────────────────────────────────────────────────
+
+¿Mis documentos quedan guardados en la nube?
+  No. Los archivos se procesan en memoria y se descartan
+  inmediatamente. Solo el TEXTO del PDF se envía a la IA de Claude.
+
+¿La app es gratuita?
+  Vercel tiene un plan gratuito más que suficiente para uso personal.
+  La API de Claude de Anthropic tiene un costo por uso (muy bajo).
+
+¿Qué pasa si el PDF está escaneado?
+  La versión de Vercel no soporta OCR (documentos escaneados).
+  Usá PDFs generados por computadora (no fotos).
+
+════════════════════════════════════════════════════════════════
