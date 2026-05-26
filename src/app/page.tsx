@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback } from "react";
 
-// ─── PDF text extraction via CDN — no npm package needed ─────────────────────
 async function extractPdfText(
   file: File
 ): Promise<{ text: string; warning?: string }> {
@@ -23,12 +22,10 @@ async function extractPdfText(
     const pdfjsLib = (window as any).pdfjsLib;
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
-
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib
       .getDocument({ data: new Uint8Array(arrayBuffer) })
       .promise;
-
     const pages: string[] = [];
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -58,7 +55,6 @@ async function extractPdfText(
   }
 }
 
-// ─── File to base64 ───────────────────────────────────────────────────────────
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -71,7 +67,6 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface ApiResponse {
   success: boolean;
   error?: string;
@@ -89,7 +84,6 @@ interface ApiResponse {
   warnings?: string[];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function downloadBase64(base64: string, filename: string) {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const blob = new Blob([bytes], {
@@ -109,3 +103,416 @@ function ConfidenceBadge({ nivel }: { nivel: string }) {
   if (nivel === "MEDIO")
     return (
       <span className="badge-yellow">
+        Confianza MEDIA — revisá los campos amarillos
+      </span>
+    );
+  return (
+    <span className="badge-red">
+      Confianza BAJA — revisá el Excel cuidadosamente
+    </span>
+  );
+}
+
+function DropZone({
+  label,
+  accept,
+  multiple,
+  files,
+  onChange,
+}: {
+  label: string;
+  accept: string;
+  multiple?: boolean;
+  files: File[];
+  onChange: (files: File[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setDragging(false);
+      const dropped = Array.from(e.dataTransfer.files);
+      onChange(multiple ? dropped : [dropped[0]]);
+    },
+    [multiple, onChange]
+  );
+
+  return (
+    <div
+      className={`upload-zone ${dragging ? "active" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        multiple={multiple}
+        className="hidden"
+        onChange={(e) => {
+          const selected = Array.from(e.target.files || []);
+          onChange(multiple ? selected : [selected[0]]);
+        }}
+      />
+      {files.length === 0 ? (
+        <>
+          <div className="text-4xl mb-3">📂</div>
+          <p className="text-gray-600 font-medium">{label}</p>
+          <p className="text-gray-400 text-sm mt-1">
+            Hacé clic o arrastrá el archivo aquí
+          </p>
+        </>
+      ) : (
+        <>
+          <div className="text-4xl mb-3">✅</div>
+          {files.map((f, i) => (
+            <p key={i} className="text-blue-700 font-medium text-sm">
+              {f.name}{" "}
+              <span className="text-gray-400">
+                ({(f.size / 1024).toFixed(0)} KB)
+              </span>
+            </p>
+          ))}
+          <p className="text-gray-400 text-xs mt-2">
+            Hacé clic para cambiar el archivo
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function Home() {
+  const [excelFiles, setExcelFiles] = useState<File[]>([]);
+  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [model, setModel] = useState("claude-sonnet-4-5");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+  const [result, setResult] = useState<ApiResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const canProcess = excelFiles.length > 0 && pdfFiles.length > 0;
+
+  const handleProcess = async () => {
+    if (!canProcess) return;
+    setIsProcessing(true);
+    setError(null);
+    setResult(null);
+    const allWarnings: string[] = [];
+    try {
+      setStatusMsg("Leyendo texto del PDF...");
+      let combinedPdfText = "";
+      for (const pdfFile of pdfFiles) {
+        const { text, warning } = await extractPdfText(pdfFile);
+        if (warning) allWarnings.push(warning);
+        if (text.trim()) {
+          combinedPdfText += `\n\n--- ${pdfFile.name} ---\n${text}`;
+        }
+      }
+      if (!combinedPdfText.trim()) {
+        setError(
+          "No se pudo extraer texto de ningún PDF. Asegurate de usar un PDF digital (no escaneado)."
+        );
+        setIsProcessing(false);
+        return;
+      }
+      setStatusMsg("Preparando el Excel...");
+      const excelBase64 = await fileToBase64(excelFiles[0]);
+      setStatusMsg("Analizando con inteligencia artificial...");
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdfText: combinedPdfText,
+          excelBase64,
+          apiKey: apiKey.trim(),
+          model,
+        }),
+      });
+      const data: ApiResponse = await res.json();
+      if (!data.success) {
+        setError(data.error || "Error desconocido.");
+      } else {
+        if (allWarnings.length > 0 && data.warnings) {
+          data.warnings.push(...allWarnings);
+        }
+        setResult(data);
+      }
+    } catch {
+      setError(
+        "No se pudo conectar con el servidor. Verificá tu conexión a internet."
+      );
+    } finally {
+      setIsProcessing(false);
+      setStatusMsg("");
+    }
+  };
+
+  return (
+    <div className="min-h-screen">
+      <header className="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-8 px-6 shadow-lg">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-3xl font-bold tracking-tight">
+            📋 UIF — Autocompletado de Planilla
+          </h1>
+          <p className="text-blue-200 mt-2 text-lg">
+            Completá automáticamente la planilla UIF desde boletos de
+            compraventa o escrituras en PDF
+          </p>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <span>🔑</span> Configuración
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                API Key de Claude (Anthropic)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type={showKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-ant-... (dejá vacío si ya la configuraste en Vercel)"
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="px-3 py-2 text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                >
+                  {showKey ? "Ocultar" : "Mostrar"}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Si guardaste la clave en Vercel → Environment Variables, podés
+                dejar este campo vacío.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Modelo de IA
+              </label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="claude-opus-4-5">
+                  Opus 4.5 — Máxima precisión
+                </option>
+                <option value="claude-sonnet-4-5">
+                  Sonnet 4.5 — Equilibrio velocidad y precisión (recomendado)
+                </option>
+                <option value="claude-haiku-4-5">
+                  Haiku 4.5 — Más rápido
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              1
+            </span>
+            Subir planilla UIF vacía (.xls o .xlsx)
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            El Excel base de la UIF con las columnas ya definidas
+          </p>
+          <DropZone
+            label="Seleccioná la planilla UIF"
+            accept=".xls,.xlsx"
+            files={excelFiles}
+            onChange={setExcelFiles}
+          />
+        </div>
+
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              2
+            </span>
+            Subir PDF(s) del documento legal
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Boleto de compraventa, escritura, cesión — podés subir varios a la vez
+          </p>
+          <DropZone
+            label="Seleccioná uno o más PDF"
+            accept=".pdf"
+            multiple
+            files={pdfFiles}
+            onChange={setPdfFiles}
+          />
+        </div>
+
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              3
+            </span>
+            Procesar
+          </h2>
+          <button
+            onClick={handleProcess}
+            disabled={!canProcess || isProcessing}
+            className="btn-primary w-full text-base py-4"
+          >
+            {isProcessing ? (
+              <>
+                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                {statusMsg || "Procesando..."}
+              </>
+            ) : (
+              "🚀 Procesar documentos"
+            )}
+          </button>
+          {isProcessing && (
+            <p className="text-sm text-gray-500 text-center mt-3">
+              Esto puede tardar hasta 60 segundos. No cerrés la página.
+            </p>
+          )}
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-5">
+            <h3 className="font-semibold text-red-700 mb-1">❌ Error</h3>
+            <p className="text-red-600 text-sm">{error}</p>
+          </div>
+        )}
+
+        {result?.success && (
+          <div className="space-y-4">
+            <div className="card">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-800">
+                  ✅ Procesamiento exitoso
+                </h2>
+                {result.confianza && (
+                  <ConfidenceBadge nivel={result.confianza.nivel} />
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="bg-green-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-green-700">
+                    {result.confianza?.campos_encontrados?.length ?? 0}
+                  </div>
+                  <div className="text-xs text-green-600 mt-1">Campos encontrados</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-red-700">
+                    {result.confianza?.campos_no_encontrados?.length ?? 0}
+                  </div>
+                  <div className="text-xs text-red-600 mt-1">No encontrados 🔴</div>
+                </div>
+                <div className="bg-yellow-50 rounded-lg p-3 text-center">
+                  <div className="text-2xl font-bold text-yellow-700">
+                    {result.confianza?.campos_revisar?.length ?? 0}
+                  </div>
+                  <div className="text-xs text-yellow-600 mt-1">A revisar 🟡</div>
+                </div>
+              </div>
+              {result.partes && result.partes.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                    Partes identificadas ({result.partes.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {result.partes.map((p, i) => {
+                      const rol = String(p.Rol ?? "?");
+                      const tipo = String(p.Tipo_de_Persona ?? "Humana");
+                      const nombre =
+                        tipo === "Humana"
+                          ? `${p.Apellidos_PH ?? ""} ${p.Nombres_PH ?? ""}`.trim()
+                          : String(p.Denominacion_PJ ?? "Sin denominación");
+                      const doc =
+                        tipo === "Humana"
+                          ? `DNI ${p.Numero_Documento_PH ?? "—"}`
+                          : `CUIT ${p.CUIT_CUIL_PJ ?? "—"}`;
+                      return (
+                        <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2 text-sm">
+                          <span className="font-medium text-blue-700 w-24 shrink-0">{rol}</span>
+                          <span className="font-semibold text-gray-800">{nombre}</span>
+                          <span className="text-gray-400 text-xs">{doc}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card bg-blue-50 border-blue-200">
+              <h3 className="font-semibold text-blue-800 mb-3">📥 Descargar Excel completado</h3>
+              <p className="text-sm text-blue-600 mb-4">
+                Celdas en <strong>rojo</strong> = no encontrado. Celdas en <strong>amarillo</strong> = requiere verificación manual.
+              </p>
+              <button
+                onClick={() => downloadBase64(result.excelBase64!, result.filename!)}
+                className="btn-primary"
+              >
+                ⬇️ Descargar {result.filename}
+              </button>
+            </div>
+
+            <div className="card">
+              <h3 className="font-semibold text-gray-800 mb-3">📋 Reporte detallado</h3>
+              <pre className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-gray-700 overflow-auto max-h-64 whitespace-pre-wrap">
+                {result.report}
+              </pre>
+              <button
+                onClick={() => {
+                  const blob = new Blob([result.report!], { type: "text/plain" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `reporte_${result.filename?.replace(".xlsx", "")}.txt`;
+                  a.click();
+                }}
+                className="mt-3 text-sm text-blue-600 underline hover:text-blue-800"
+              >
+                Descargar reporte como .txt
+              </button>
+            </div>
+
+            {result.warnings && result.warnings.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <h3 className="font-semibold text-amber-700 mb-2">⚠️ Avisos</h3>
+                <ul className="space-y-1">
+                  {result.warnings.map((w, i) => (
+                    <li key={i} className="text-sm text-amber-700">• {w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      <footer className="border-t border-gray-200 mt-12 py-6 px-4 text-center text-xs text-gray-400">
+        <p>
+          El texto del PDF se extrae en tu navegador. Solo ese texto se envía a la API de Claude para su interpretación. No se almacena ningún dato en los servidores.
+        </p>
+      </footer>
+    </div>
+  );
+}
