@@ -5,7 +5,6 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { extractTextFromPdf } from "../../../../lib/pdf-extractor";
 import { extractDataWithAI } from "../../../../lib/ai-mapper";
 import {
   readExcelHeaders,
