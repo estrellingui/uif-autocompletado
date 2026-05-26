@@ -2,9 +2,63 @@
 
 import { useState, useRef, useCallback } from "react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── PDF text extraction (runs in the browser, no server needed) ─────────────
+async function extractPdfText(
+  file: File
+): Promise<{ text: string; warning?: string }> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdfjsLib = await import("pdfjs-dist" as any);
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+
+    const pdf = await pdfjsLib
+      .getDocument({ data: new Uint8Array(arrayBuffer) })
+      .promise;
+
+    const pages: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pageText = content.items
+        .filter((item: any) => "str" in item)
+        .map((item: any) => item.str)
+        .join(" ");
+      pages.push(pageText);
+    }
+
+    const text = pages.join("\n\n");
+    if (text.trim().length < 100) {
+      return {
+        text,
+        warning: `El PDF "${file.name}" tiene muy poco texto. Si está escaneado no se puede procesar automáticamente.`,
+      };
+    }
+    return { text };
+  } catch (err) {
+    return {
+      text: "",
+      warning: `No se pudo leer "${file.name}": ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+// ─── File to base64 ───────────────────────────────────────────────────────────
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(",")[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface ApiResponse {
   success: boolean;
   error?: string;
@@ -22,9 +76,7 @@ interface ApiResponse {
   warnings?: string[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function downloadBase64(base64: string, filename: string) {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const blob = new Blob([bytes], {
@@ -38,23 +90,23 @@ function downloadBase64(base64: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-function confidenceBadge(nivel: string) {
+function ConfidenceBadge({ nivel }: { nivel: string }) {
   if (nivel === "ALTO")
-    return (
-      <span className="badge-green">Confianza ALTA</span>
-    );
+    return <span className="badge-green">Confianza ALTA</span>;
   if (nivel === "MEDIO")
     return (
-      <span className="badge-yellow">Confianza MEDIA — revisá los campos amarillos</span>
+      <span className="badge-yellow">
+        Confianza MEDIA — revisá los campos amarillos
+      </span>
     );
   return (
-    <span className="badge-red">Confianza BAJA — revisá el Excel cuidadosamente</span>
+    <span className="badge-red">
+      Confianza BAJA — revisá el Excel cuidadosamente
+    </span>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Component: File drop zone
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── DropZone ─────────────────────────────────────────────────────────────────
 function DropZone({
   label,
   accept,
@@ -84,7 +136,10 @@ function DropZone({
   return (
     <div
       className={`upload-zone ${dragging ? "active" : ""}`}
-      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
       onClick={() => inputRef.current?.click()}
@@ -128,9 +183,7 @@ function DropZone({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Page
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Home() {
   const [excelFiles, setExcelFiles] = useState<File[]>([]);
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
@@ -143,34 +196,60 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const canProcess =
-    excelFiles.length > 0 && pdfFiles.length > 0 && apiKey.trim().length > 0;
+    excelFiles.length > 0 && pdfFiles.length > 0;
 
   const handleProcess = async () => {
     if (!canProcess) return;
     setIsProcessing(true);
     setError(null);
     setResult(null);
-    setStatusMsg("Subiendo archivos...");
+    const allWarnings: string[] = [];
 
     try {
-      const formData = new FormData();
-      formData.append("excel", excelFiles[0]);
-      pdfFiles.forEach((f) => formData.append("pdfs", f));
-      formData.append("apiKey", apiKey.trim());
-      formData.append("model", model);
+      // Step 1: Extract PDF text in the browser
+      setStatusMsg("Leyendo texto del PDF...");
+      let combinedPdfText = "";
+      for (const pdfFile of pdfFiles) {
+        const { text, warning } = await extractPdfText(pdfFile);
+        if (warning) allWarnings.push(warning);
+        if (text.trim()) {
+          combinedPdfText += `\n\n--- ${pdfFile.name} ---\n${text}`;
+        }
+      }
 
-      setStatusMsg("Extrayendo texto del PDF...");
+      if (!combinedPdfText.trim()) {
+        setError(
+          "No se pudo extraer texto de ningún PDF. Asegurate de usar un PDF digital (no escaneado)."
+        );
+        setIsProcessing(false);
+        return;
+      }
+
+      // Step 2: Convert Excel to base64
+      setStatusMsg("Preparando el Excel...");
+      const excelBase64 = await fileToBase64(excelFiles[0]);
+
+      // Step 3: Send to API
+      setStatusMsg("Analizando con inteligencia artificial...");
       const res = await fetch("/api/process", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdfText: combinedPdfText,
+          excelBase64,
+          apiKey: apiKey.trim(),
+          model,
+        }),
       });
 
-      setStatusMsg("Analizando con inteligencia artificial...");
       const data: ApiResponse = await res.json();
 
       if (!data.success) {
         setError(data.error || "Error desconocido.");
       } else {
+        if (allWarnings.length > 0 && data.warnings) {
+          data.warnings.push(...allWarnings);
+        }
         setResult(data);
       }
     } catch (e) {
@@ -185,7 +264,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen">
-      {/* ── Header ── */}
+      {/* Header */}
       <header className="bg-gradient-to-r from-blue-900 to-blue-700 text-white py-8 px-6 shadow-lg">
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold tracking-tight">
@@ -199,7 +278,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-        {/* ── API Key config ── */}
+        {/* Config */}
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <span>🔑</span> Configuración
@@ -214,7 +293,7 @@ export default function Home() {
                   type={showKey ? "text" : "password"}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-ant-..."
+                  placeholder="sk-ant-... (dejá vacío si ya la configuraste en Vercel)"
                   className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
@@ -226,19 +305,10 @@ export default function Home() {
                 </button>
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                Conseguila en{" "}
-                <a
-                  href="https://console.anthropic.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 underline"
-                >
-                  console.anthropic.com
-                </a>{" "}
-                → API Keys → Create Key. No se guarda en ningún servidor.
+                Si guardaste la clave en Vercel → Environment Variables, podés
+                dejar este campo vacío.
               </p>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Modelo de IA
@@ -249,27 +319,29 @@ export default function Home() {
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="claude-opus-4-5">
-                  Opus 4.5 — Máxima precisión (recomendado para documentos complejos)
+                  Opus 4.5 — Máxima precisión
                 </option>
                 <option value="claude-sonnet-4-5">
-                  Sonnet 4.5 — Equilibrio velocidad y precisión
+                  Sonnet 4.5 — Equilibrio velocidad y precisión (recomendado)
                 </option>
                 <option value="claude-haiku-4-5">
-                  Haiku 4.5 — Más rápido (documentos simples)
+                  Haiku 4.5 — Más rápido
                 </option>
               </select>
             </div>
           </div>
         </div>
 
-        {/* ── Step 1: Excel ── */}
+        {/* Step 1 */}
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
-            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">1</span>
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              1
+            </span>
             Subir planilla UIF vacía (.xls o .xlsx)
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Es el Excel base de la UIF con las columnas ya definidas
+            El Excel base de la UIF con las columnas ya definidas
           </p>
           <DropZone
             label="Seleccioná la planilla UIF"
@@ -279,14 +351,17 @@ export default function Home() {
           />
         </div>
 
-        {/* ── Step 2: PDFs ── */}
+        {/* Step 2 */}
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
-            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">2</span>
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              2
+            </span>
             Subir PDF(s) del documento legal
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Boleto de compraventa, escritura, cesión — podés subir varios a la vez
+            Boleto de compraventa, escritura, cesión — podés subir varios a la
+            vez
           </p>
           <DropZone
             label="Seleccioná uno o más PDF"
@@ -297,18 +372,14 @@ export default function Home() {
           />
         </div>
 
-        {/* ── Step 3: Process ── */}
+        {/* Step 3 */}
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">3</span>
+            <span className="bg-blue-600 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold">
+              3
+            </span>
             Procesar
           </h2>
-
-          {!apiKey.trim() && (
-            <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-              ⚠️ Ingresá la API Key de Claude en el panel de arriba para continuar.
-            </p>
-          )}
 
           <button
             onClick={handleProcess}
@@ -317,9 +388,24 @@ export default function Home() {
           >
             {isProcessing ? (
               <>
-                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                <svg
+                  className="animate-spin h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8H4z"
+                  />
                 </svg>
                 {statusMsg || "Procesando..."}
               </>
@@ -335,7 +421,7 @@ export default function Home() {
           )}
         </div>
 
-        {/* ── Error ── */}
+        {/* Error */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-5">
             <h3 className="font-semibold text-red-700 mb-1">❌ Error</h3>
@@ -343,16 +429,17 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Results ── */}
+        {/* Results */}
         {result?.success && (
           <div className="space-y-4">
-            {/* Summary */}
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-800">
                   ✅ Procesamiento exitoso
                 </h2>
-                {result.confianza && confidenceBadge(result.confianza.nivel)}
+                {result.confianza && (
+                  <ConfidenceBadge nivel={result.confianza.nivel} />
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-4 mb-4">
@@ -360,23 +447,28 @@ export default function Home() {
                   <div className="text-2xl font-bold text-green-700">
                     {result.confianza?.campos_encontrados?.length ?? 0}
                   </div>
-                  <div className="text-xs text-green-600 mt-1">Campos encontrados</div>
+                  <div className="text-xs text-green-600 mt-1">
+                    Campos encontrados
+                  </div>
                 </div>
                 <div className="bg-red-50 rounded-lg p-3 text-center">
                   <div className="text-2xl font-bold text-red-700">
                     {result.confianza?.campos_no_encontrados?.length ?? 0}
                   </div>
-                  <div className="text-xs text-red-600 mt-1">No encontrados 🔴</div>
+                  <div className="text-xs text-red-600 mt-1">
+                    No encontrados 🔴
+                  </div>
                 </div>
                 <div className="bg-yellow-50 rounded-lg p-3 text-center">
                   <div className="text-2xl font-bold text-yellow-700">
                     {result.confianza?.campos_revisar?.length ?? 0}
                   </div>
-                  <div className="text-xs text-yellow-600 mt-1">A revisar 🟡</div>
+                  <div className="text-xs text-yellow-600 mt-1">
+                    A revisar 🟡
+                  </div>
                 </div>
               </div>
 
-              {/* Parties */}
               {result.partes && result.partes.length > 0 && (
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
@@ -402,11 +494,10 @@ export default function Home() {
                           <span className="font-medium text-blue-700 w-24 shrink-0">
                             {rol}
                           </span>
-                          <span className="font-semibold text-gray-800">{nombre}</span>
-                          <span className="text-gray-400 text-xs">{doc}</span>
-                          <span className="text-gray-400 text-xs">
-                            {tipo === "Humana" ? "👤 Persona Humana" : "🏢 Persona Jurídica"}
+                          <span className="font-semibold text-gray-800">
+                            {nombre}
                           </span>
+                          <span className="text-gray-400 text-xs">{doc}</span>
                         </div>
                       );
                     })}
@@ -421,9 +512,8 @@ export default function Home() {
                 📥 Descargar Excel completado
               </h3>
               <p className="text-sm text-blue-600 mb-4">
-                Las celdas en <strong>rojo</strong> son campos que no se
-                encontraron en el documento. Las celdas en{" "}
-                <strong>amarillo</strong> requieren verificación manual.
+                Celdas en <strong>rojo</strong> = no encontrado. Celdas en{" "}
+                <strong>amarillo</strong> = requiere verificación manual.
               </p>
               <button
                 onClick={() =>
@@ -445,7 +535,9 @@ export default function Home() {
               </pre>
               <button
                 onClick={() => {
-                  const blob = new Blob([result.report!], { type: "text/plain" });
+                  const blob = new Blob([result.report!], {
+                    type: "text/plain",
+                  });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
@@ -461,9 +553,7 @@ export default function Home() {
             {/* Warnings */}
             {result.warnings && result.warnings.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <h3 className="font-semibold text-amber-700 mb-2">
-                  ⚠️ Avisos
-                </h3>
+                <h3 className="font-semibold text-amber-700 mb-2">⚠️ Avisos</h3>
                 <ul className="space-y-1">
                   {result.warnings.map((w, i) => (
                     <li key={i} className="text-sm text-amber-700">
@@ -477,14 +567,14 @@ export default function Home() {
         )}
       </main>
 
-      {/* ── Footer ── */}
       <footer className="border-t border-gray-200 mt-12 py-6 px-4 text-center text-xs text-gray-400">
         <p>
-          Los archivos se procesan en la nube (Vercel). Solo el texto del PDF se
-          envía a la API de Claude (Anthropic) para su interpretación. No se
-          almacena ningún archivo ni dato personal en los servidores.
+          El texto del PDF se extrae en tu navegador. Solo ese texto (no el
+          archivo) se envía a la API de Claude para su interpretación. No se
+          almacena ningún dato en los servidores.
         </p>
       </footer>
     </div>
   );
 }
+
