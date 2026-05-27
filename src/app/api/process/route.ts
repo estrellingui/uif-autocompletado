@@ -1,11 +1,12 @@
 /**
  * POST /api/process
- * Receives JSON: { pdfText, excelBase64, apiKey, model }
- * PDF text is extracted client-side (avoids Vercel 4.5MB body limit).
+ * Receives JSON: { pdfText?, pdfImages?, excelBase64, apiKey, model }
+ * PDF text is extracted client-side. Scanned PDFs are rendered as images
+ * in the browser and sent here for Claude Vision OCR.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { extractDataWithAI } from "../../../../lib/ai-mapper";
+import { extractDataWithAI, extractDataFromImages } from "../../../../lib/ai-mapper";
 import { readExcelHeaders, buildAndWriteExcel } from "../../../../lib/excel-handler";
 
 export const runtime = "nodejs";
@@ -14,7 +15,7 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { pdfText, excelBase64, apiKey: bodyApiKey, model } = body;
+    const { pdfText, pdfImages, excelBase64, apiKey: bodyApiKey, model } = body;
 
     const apiKey = bodyApiKey || process.env.ANTHROPIC_API_KEY || "";
 
@@ -25,9 +26,13 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (!pdfText || String(pdfText).trim().length < 50) {
+
+    const hasText = pdfText && String(pdfText).trim().length >= 50;
+    const hasImages = Array.isArray(pdfImages) && pdfImages.length > 0;
+
+    if (!hasText && !hasImages) {
       return NextResponse.json(
-        { success: false, error: "No se pudo extraer texto del PDF. Asegurate de que sea un PDF digital (no escaneado)." },
+        { success: false, error: "No se pudo leer el PDF. Probá con otro archivo." },
         { status: 400 }
       );
     }
@@ -42,12 +47,11 @@ export async function POST(req: NextRequest) {
     const excelBuffer = Buffer.from(excelBase64, "base64");
     const headers = await readExcelHeaders(excelBuffer);
 
-    // AI extraction
-    const aiResult = await extractDataWithAI(
-      String(pdfText),
-      apiKey,
-      model || "claude-sonnet-4-5"
-    );
+    // AI extraction — vision for scanned PDFs, text for digital ones
+    const aiResult =
+      hasImages && !hasText
+        ? await extractDataFromImages(pdfImages, apiKey, model || "claude-sonnet-4-5")
+        : await extractDataWithAI(String(pdfText), apiKey, model || "claude-sonnet-4-5");
 
     // Build output Excel
     const { buffer, rows, report } = await buildAndWriteExcel(
