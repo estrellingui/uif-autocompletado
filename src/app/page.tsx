@@ -232,6 +232,7 @@ export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [model, setModel] = useState("claude-sonnet-4-5");
+  const [showConfig, setShowConfig] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [result, setResult] = useState<ApiResponse | null>(null);
@@ -332,58 +333,70 @@ export default function Home() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-        {/* Config */}
+        {/* Config — collapsed by default */}
         <div className="card">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <span>🔑</span> Configuración
-          </h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                API Key de Claude (Anthropic)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-ant-... (dejá vacío si ya la configuraste en Vercel)"
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  className="px-3 py-2 text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
-                >
-                  {showKey ? "Ocultar" : "Mostrar"}
-                </button>
+          <button
+            type="button"
+            onClick={() => setShowConfig(!showConfig)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <h2 className="text-sm font-medium text-gray-500 flex items-center gap-2">
+              <span>⚙️</span> Configuración avanzada
+            </h2>
+            <span className="text-gray-400 text-xs">
+              {showConfig ? "▲ Ocultar" : "▼ Mostrar"}
+            </span>
+          </button>
+
+          {showConfig && (
+            <div className="space-y-4 mt-4 pt-4 border-t border-gray-100">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  API Key de Claude (Anthropic)
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type={showKey ? "text" : "password"}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-ant-... (dejá vacío si ya la configuraste en Vercel)"
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    className="px-3 py-2 text-gray-500 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+                  >
+                    {showKey ? "Ocultar" : "Mostrar"}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Si guardaste la clave en Vercel → Environment Variables, dejá
+                  este campo vacío.
+                </p>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Si guardaste la clave en Vercel → Environment Variables, podés
-                dejar este campo vacío.
-              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Modelo de IA
+                </label>
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="claude-opus-4-5">
+                    Opus 4.5 — Máxima precisión
+                  </option>
+                  <option value="claude-sonnet-4-5">
+                    Sonnet 4.5 — Equilibrio velocidad y precisión (recomendado)
+                  </option>
+                  <option value="claude-haiku-4-5">
+                    Haiku 4.5 — Más rápido
+                  </option>
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Modelo de IA
-              </label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="claude-opus-4-5">
-                  Opus 4.5 — Máxima precisión
-                </option>
-                <option value="claude-sonnet-4-5">
-                  Sonnet 4.5 — Equilibrio velocidad y precisión (recomendado)
-                </option>
-                <option value="claude-haiku-4-5">
-                  Haiku 4.5 — Más rápido
-                </option>
-              </select>
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Step 1 */}
@@ -631,3 +644,4 @@ export default function Home() {
     </div>
   );
 }
+
