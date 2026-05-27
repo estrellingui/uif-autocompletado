@@ -114,6 +114,58 @@ export interface ExtractionData {
   };
 }
 
+/**
+ * Extract data from scanned PDF pages using Claude Vision.
+ * Images are base64-encoded JPEGs rendered client-side from PDF.js canvas.
+ */
+export async function extractDataFromImages(
+  images: string[], // base64 JPEG strings
+  apiKey: string,
+  model: string = "claude-sonnet-4-5"
+): Promise<ExtractionData> {
+  if (!apiKey?.trim()) {
+    throw new Error("API Key de Claude no configurada.");
+  }
+  if (!images || images.length === 0) {
+    throw new Error("No se recibieron imágenes del PDF escaneado.");
+  }
+
+  const client = new Anthropic({ apiKey: apiKey.trim() });
+
+  // Build image content blocks for Claude Vision
+  const imageContent = images.map((img) => ({
+    type: "image" as const,
+    source: {
+      type: "base64" as const,
+      media_type: "image/jpeg" as const,
+      data: img,
+    },
+  }));
+
+  const visionPrompt = EXTRACTION_TEMPLATE.replace(
+    "DOCUMENTO:\n{TEXT}",
+    "DOCUMENTO (páginas escaneadas — leé el texto de las imágenes):"
+  );
+
+  const message = await client.messages.create({
+    model,
+    max_tokens: 4096,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: [
+          ...imageContent,
+          { type: "text" as const, text: visionPrompt },
+        ],
+      },
+    ],
+  });
+
+  const raw = (message.content[0] as { text: string }).text;
+  return parseJsonResponse(raw);
+}
+
 export async function extractDataWithAI(
   documentText: string,
   apiKey: string,
@@ -162,3 +214,4 @@ function parseJsonResponse(raw: string): ExtractionData {
     );
   }
 }
+
